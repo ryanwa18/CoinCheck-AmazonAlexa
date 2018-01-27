@@ -1,54 +1,137 @@
 /**
  * @author Ryan Ward
- * @version 1.0
+ * @version 1.2
  * 
  * This is a small alexa skill that can tell a user the price of several different cryptocurrencies.
+ * Currently the skill only responds with the USD value of each cryptocurrency.
+ * 
+ * Please note that this is the first released version on the Alexa Skill Store.
+ * 
+ * Future Plans:
+ * - Support different currencies other than USD, depending on the location of the user.
+ * - Eventually support asking the top {number} coins on coinmarketcap.com
  */
 
 "use strict";
  
 // Include the Alexa SDK
 var Alexa = require("alexa-sdk");
+// Include https to be able to make api calls.
 var https = require("https");
+
+// The different messages corresponding to the different intents.
+var errorMessage = "I'm sorry, I didn't get that. Could you please ask again?";
+var helpMessage = "Simply ask for the price of any popular cryptocurrency. For example you could say, 'ask coin check for the current price of Bitcoin.'";
+var launchMessage = "Welcome to coin check! What currency do you want to hear the price of?";
+var goodbyeMessage = "Goodbye!";
  
 // The handlers object tells Alexa how to handle various actions
 var handlers = {
-    "LaunchRequest": function () {
-      this.emit(":tell", "Welcome to Crypto Check!"); // Create speech output. This is what Alexa will speak back when the user says "Open bitcoin checker"
+    
+    /**
+     * The LaunchRequest is called when the user asks 'Alexa open coin check.'
+     */
+    "LaunchRequest": function () 
+    {
+      this.emit(":ask", launchMessage);
+      this.emit(":responseReady");
     },
-    "PriceIntent": function () {
-        var crypto = this.event.request.intent.slots.cryptocurrency.value;
-        if (typeof(crypto) != "undefined") {
-            crypto = crypto.toLowerCase();
-            var path = "https://api.coinmarketcap.com/v1/ticker/" + crypto + "/";
-            //https://api.coinmarketcap.com/v1/ticker/ URL for the api call to get current price.
-            var req = https.get(path, res => {
-                res.setEncoding('utf8');
-                var returnData = "";
-                
-                res.on('data', chunk => {
-                    returnData =  returnData + chunk;
-                });
-                
-                res.on('end', () => {
-                    var result = JSON.parse(returnData);
-                    var price = result[0].price_usd;
-                    // Ensures that a cryptocurrency was spoken by the user.
-                    this.emit(":tell", "The current price of " + crypto + " is " + price + " USD");
-                    this.emit(":responseReady");
-                });
-            });
-            
-            req.end();
-        }
-        else {
-            this.emit(":tell", "I'm sorry, I didn't get that. Could you please ask the question again?");
+    /**
+     * The HelpIntent is called when the user responds to the prompt with 'Help.'
+     */
+    "AMAZON.HelpIntent": function() {
+        this.emit(":ask", helpMessage);
+        this.emit(":responseReady");
+    },
+    /**
+     * The PriceIntent is called when the user responds to the prompt with the name
+     * of a popular cryptocurrency.
+     */
+    "PriceIntent": function () 
+    {
+        var answerSlotValid = isAnswerSlotValid(this.event.request.intent);
+        
+        if (!answerSlotValid || this.event.request.intent.slots.cryptocurrency.value == null) {
+            this.emit(":ask", errorMessage);
             this.emit(":responseReady");
         }
-     
+        else {
+            var crypto = this.event.request.intent.slots.cryptocurrency.value;
+            if (typeof(crypto) != "undefined") 
+            {
+                crypto = crypto.toLowerCase();
+                crypto = crypto.replace(" ", "-");
+                var path = "https://api.coinmarketcap.com/v1/ticker/" + crypto + "/";
+                var req = https.get(path, res => 
+                {
+                    res.setEncoding('utf8');
+                    var returnData = "";
+                    
+                    res.on('data', chunk => {
+                        returnData =  returnData + chunk;
+                    });
+                    
+                    res.on('end', () => {
+                        try {
+                            var result = JSON.parse(returnData);
+                            if (typeof(result[0]) == "undefined") {
+                                this.emit(":ask", errorMessage);
+                                this.emit(":responseReady");
+                            }
+                            else {
+                                var price = result[0].price_usd;
+                                var priceMessage = "The current price of " + crypto + " is " + price + " USD";
+                                this.emit(":tell", priceMessage);
+                                this.emit(":responseReady");
+                            }
+                        }
+                        catch (e) {
+                            this.emit(":ask", errorMessage);
+                            this.emit(":responseReady");
+                        }
+                    });
+                    
+                    res.on('error', () => {
+                        this.emit(":ask", errorMessage);
+                        this.emit(":responseReady");
+                    });
+                });
+                
+                req.end();
+            }
+        }
+    },
+    /**
+     * The Unhandled function is called when an unspecified for in the intent is present.
+     */
+    "Unhandled": function() {
+        this.emit(":ask", errorMessage);
+        this.emit(":responseReady");
+    },
+    /**
+     * The CancelIntent function is called when the user responds to the prompt with 'Cancel.'
+     */
+    'AMAZON.CancelIntent': function () { 
+        this.emit(':tell', "Goodbye!");
+    },
+    /**
+     * The StopIntent function is called when the user responds to the prompt with 'Stop.'
+     */
+    'AMAZON.StopIntent': function () { 
+        this.emit(':tell', "Goodbye!");
     }
 };
- 
+
+/**
+ * Returns false if the answer slot is not valid and true otherwise.
+ * For example if the answer slot was "", this would return false.
+ * However if the answer slot was "Bicoin", this would return true.
+ */
+function isAnswerSlotValid(intent) {
+    var answerSlotFilled = intent && intent.slots &&
+        intent.slots.cryptocurrency && intent.slots.cryptocurrency.value;
+    return answerSlotFilled;
+}
  
 // This is the function that AWS Lambda calls every time Alexa uses your skill.
 exports.handler = function(event, context, callback) {
