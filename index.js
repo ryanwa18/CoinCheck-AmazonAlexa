@@ -1,6 +1,6 @@
 /**
  * @author Ryan Ward
- * @version 1.2
+ * @version 1.4
  * 
  * This is a small alexa skill that can tell a user the price of several different cryptocurrencies.
  * Currently the skill only responds with the USD value of each cryptocurrency.
@@ -9,7 +9,6 @@
  * 
  * Future Plans:
  * - Support different currencies other than USD, depending on the location of the user.
- * - Eventually support asking the top {number} coins on coinmarketcap.com
  */
 
 "use strict";
@@ -24,6 +23,9 @@ var errorMessage = "I'm sorry, I didn't get that. Could you please ask again?";
 var helpMessage = "Simply ask for the price of any popular cryptocurrency. For example you could say, 'ask coin check for the current price of Bitcoin.'";
 var launchMessage = "Welcome to coin check! What currency do you want to hear the price of?";
 var goodbyeMessage = "Goodbye!";
+var thresholdMessage = "Please ask for the top one or more cryptocurrencies. Could you please ask again?"
+
+var DEFAULT_TOP_CURRENCIES = 5;
  
 // The handlers object tells Alexa how to handle various actions
 var handlers = {
@@ -102,6 +104,59 @@ var handlers = {
         }
     },
     /**
+     * The TopCurrencies function is called when the user asks for the top currencies.
+     * If the {number} is left out of the request then the response returns the top 5 currencies.
+     */
+     "TopCurrencies": function() {
+        var number = this.event.request.intent.slots.number.value;
+        
+        if (number == null) {
+            number = DEFAULT_TOP_CURRENCIES;
+        }
+        else if (number < 1) {
+            this.emit(":ask", thresholdMessage);
+            this.emit(":responseReady");
+        }
+        
+        var path = "https://api.coinmarketcap.com/v1/ticker/?limit=" + number;
+        
+        var req = https.get(path, res => 
+            {
+                res.setEncoding('utf8');
+                var returnData = "";
+                
+                res.on('data', chunk => {
+                    returnData =  returnData + chunk;
+                });
+                
+                res.on('end', () => {
+                    try {
+                        var result = JSON.parse(returnData);
+                        if (typeof(result[0]) == "undefined") {
+                            this.emit(":ask", errorMessage);
+                            this.emit(":responseReady");
+                        }
+                        else {
+                            var list = "The top " + number + " currencies are " + currencyList(result);
+                            this.emit(":tell", list);
+                            this.emit(":responseReady");
+                        }
+                    }
+                    catch (e) {
+                        this.emit(":ask", errorMessage);
+                        this.emit(":responseReady");
+                    }
+                });
+                
+                res.on('error', () => {
+                    this.emit(":ask", errorMessage);
+                    this.emit(":responseReady");
+                });
+            });
+                
+            req.end();
+     },
+    /**
      * The Unhandled function is called when an unspecified for in the intent is present.
      */
     "Unhandled": function() {
@@ -112,13 +167,13 @@ var handlers = {
      * The CancelIntent function is called when the user responds to the prompt with 'Cancel.'
      */
     'AMAZON.CancelIntent': function () { 
-        this.emit(':tell', "Goodbye!");
+        this.emit(':tell', goodbyeMessage);
     },
     /**
      * The StopIntent function is called when the user responds to the prompt with 'Stop.'
      */
     'AMAZON.StopIntent': function () { 
-        this.emit(':tell', "Goodbye!");
+        this.emit(':tell', goodbyeMessage);
     }
 };
 
@@ -132,6 +187,19 @@ function isAnswerSlotValid(intent) {
         intent.slots.cryptocurrency && intent.slots.cryptocurrency.value;
     return answerSlotFilled;
 }
+
+/**
+ * Returns a list of the currencies from the parsed JSON response as a string.
+ */
+function currencyList(result) {
+    var list = "";
+    for (var i = 0; i < result.length - 1; i++) {
+        list += result[i].name + ", ";
+    }
+    list += "and " + result[result.length - 1].name;
+    return list;
+}
+
  
 // This is the function that AWS Lambda calls every time Alexa uses your skill.
 exports.handler = function(event, context, callback) {
